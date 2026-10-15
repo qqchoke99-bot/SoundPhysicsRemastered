@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+
+      - name: Build (android arm64-v8a, release)
+        run: |
+          xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
+          xmake -y
+
+      - name: Package .levipack
+        run: |
+          python3 - <<'EOF'
+          import json, shutil, zipfile
+          from pathlib import Path
+          so = Path("build/android/arm64-v8a/release/libSoundPhysiczRecreate.so")
+          assert so.exists(), f"missing {so}"
+          pkg = Path("pkg") / "SoundPhysicsRemastered.levipack"
+          pkg.parent.mkdir(exist_ok=True)
+          manifest = json.loads(Path("manifest.template.json").read_text())
+          with zipfile.ZipFile(pkg, "w", zipfile.ZIP_DEFLATED) as z:
+              z.write(so, so.name)
+              z.writestr("manifest.json", json.dumps(manifest, indent=2))
+              z.write("assets/icon.png", "icon.png")
+          print("wrote", pkg, pkg.stat().st_size, "bytes")
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SoundPhysicsRemastered-levipack
+          path: pkg/SoundPhysicsRemastered.levipack
+          if-no-files-found: error
