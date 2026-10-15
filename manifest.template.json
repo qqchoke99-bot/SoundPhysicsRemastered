@@ -1,0 +1,11 @@
+{
+  "type": "preload-native",
+  "name": "SoundPhysiczRecreate",
+  "author": "Recreate-from-VCX-RE",
+  "description": "FMOD-hook sound physics (VCX architecture): reverb + occlusion. getBlock for rays.",
+  "version": "0.1.0",
+  "entry": "libSoundPhysiczRecreate.so",
+  "icon": "icon.png",
+  "overwrite_files": ["icon.png"],
+  "overwrite_folders": []
+}
