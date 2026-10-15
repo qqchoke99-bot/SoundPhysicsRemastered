@@ -1,43 +1,36 @@
 #include "Log.hpp"
-#include "cfg/Config.hpp"
-#include "fmod/FmodApi.hpp"
+#include "fmod/FmodBridge.hpp"
 #include "mc/World.hpp"
-#include "reverb/Reverb.hpp"
-#include "occ/Occlusion.hpp"
-#include "spz/Version.hpp"
+#include "spp/Version.hpp"
 
-#include <cstring>
+#include <pl/Mod.hpp>
 
-// Levi / preloader mod registration — OPENCODE: match exact ABI of Levi 1.5.x
-extern "C" {
+namespace {
 
-struct PLModInfo {
-    const char* name;
-    const char* version;
-    const char* author;
-    const char* description;
+class SppMod {
+public:
+    static SppMod& instance() {
+        static SppMod m;
+        return m;
+    }
+    bool load(pl::mod::ModContext&) {
+        SPP_LOGI("%s v%s — pure Sound Physics Perfected formulas (not SPR)", spp::version::Name.data(),
+                 spp::version::Version.data());
+        return true;
+    }
+    bool enable(pl::mod::ModContext&) {
+        spp::fmodx::onEnable();
+        spp::mc::installClientDriver();
+        return true;
+    }
+    bool disable(pl::mod::ModContext&) {
+        spp::mc::uninstallClientDriver();
+        spp::fmodx::onDisable();
+        return true;
+    }
+    bool unload(pl::mod::ModContext& c) { return disable(c); }
 };
 
-// Placeholder: real Levi uses PLGetModRegistration returning vtable/callbacks.
-__attribute__((visibility("default"))) void* PLGetModRegistration() {
-    SPZ_LOGI("loading %s v%s (target MC %s)",
-             spz::version::Name.data(), spz::version::Version.data(),
-             spz::version::TargetMinecraftVersion.data());
-    spz::cfg::loadDefaults();
-    if (!spz::fmodapi::api().resolve()) {
-        SPZ_LOGE("FMOD resolve failed");
-        return nullptr;
-    }
-    spz::mc::initSignatures();
-    spz::fmodapi::api().installHooks();
-    SPZ_LOGI("SoundPhysicz recreate ready (hook FMOD + getBlock when wired)");
-    return (void*)1; // OPENCODE: return real registration object
-}
+} // namespace
 
-__attribute__((visibility("default"))) void PLModUnload() {
-    spz::reverb::shutdown();
-    spz::occ::shutdown();
-    spz::fmodapi::api().uninstallHooks();
-}
-
-} // extern C
+PL_REGISTER_MOD(SppMod, SppMod::instance())

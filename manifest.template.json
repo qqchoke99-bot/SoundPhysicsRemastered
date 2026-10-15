@@ -1,11 +1,9 @@
 {
   "type": "preload-native",
-  "name": "SoundPhysiczRecreate",
-  "author": "Recreate-from-VCX-RE",
-  "description": "SPP full-accuracy port (Sound Physics Perfected -> FMOD): player-cast rays, Sabine reverb, permeation occlusion.",
-  "version": "0.3.0-SPP",
-  "entry": "libSoundPhysiczRecreate.so",
-  "icon": "icon.png",
-  "overwrite_files": ["icon.png"],
-  "overwrite_folders": []
+  "name": "SPP-Bedrock",
+  "author": "SPP-port",
+  "description": "Sound Physics Perfected formulas on Bedrock. Not SPR.",
+  "version": "1.0.0",
+  "entry": "libSPPBedrock.so",
+  "icon": "icon.png"
 }

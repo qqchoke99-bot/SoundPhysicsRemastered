@@ -30,9 +30,9 @@ jobs:
           python3 - <<'EOF'
           import json, shutil, zipfile
           from pathlib import Path
-          so = Path("build/android/arm64-v8a/release/libSoundPhysiczRecreate.so")
+          so = Path("build/android/arm64-v8a/release/libSPPBedrock.so")
           assert so.exists(), f"missing {so}"
-          pkg = Path("pkg") / "SoundPhysicsRemastered.levipack"
+          pkg = Path("pkg") / "SPP-Bedrock.levipack"
           pkg.parent.mkdir(exist_ok=True)
           manifest = json.loads(Path("manifest.template.json").read_text())
           with zipfile.ZipFile(pkg, "w", zipfile.ZIP_DEFLATED) as z:
@@ -44,6 +44,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SoundPhysicsRemastered-levipack
-          path: pkg/SoundPhysicsRemastered.levipack
+          name: SPP-Bedrock-levipack
+          path: pkg/SPP-Bedrock.levipack
           if-no-files-found: error
