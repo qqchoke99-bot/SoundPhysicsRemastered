@@ -1,4 +1,16 @@
 add_rules("mode.release")
+
+package("preloader")
+    set_homepage("https://github.com/LiteLDev/preloader-android")
+    set_description("Preloader Android")
+    add_urls("https://github.com/LiteLDev/preloader-android.git")
+    add_versions("1.5.25", "5d108da350ce3e7f13f51415f81e65344ecd5d14")
+    add_deps("cmake")
+    on_install("android", function (package)
+        import("package.tools.cmake").install(package)
+    end)
+package_end()
+
 add_requires("preloader 1.5.25")
 add_requires("fmt")
 target("SPP-Bedrock")
