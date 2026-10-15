@@ -2,7 +2,9 @@
 #include "fmod/FmodApi.hpp"
 #include "mc/World.hpp"
 #include "cfg/Config.hpp"
-#include "trace/PathTrace.hpp"
+#include "spp/SppEngine.hpp"
+#include "spp/SppReverb.hpp"
+#include "spp/SppConfig.hpp"
 #include "Log.hpp"
 
 #include <cmath>
@@ -15,24 +17,25 @@ namespace {
 std::mutex gMu;
 std::vector<void*> gChannels;
 
-void sendProps(float decayMs, float earlyMs, float wetDb, float diffusion, float density) {
+void sendProps(const spp::SppFmod& f) {
     auto& a = fmodapi::api();
     if (!a.system || !a.setSystemReverb) return;
     FMOD_REVERB_PROPERTIES p{};
-    p.DecayTime = decayMs;
-    p.EarlyDelay = earlyMs;
-    p.LateDelay = earlyMs * 1.5f + 5.f;
-    p.HFReference = 5000.f;
-    p.HFDecayRatio = 0.65f;
-    p.Diffusion = diffusion * 100.f;
-    p.Density = density * 100.f;
+    p.DecayTime = f.decayMs;
+    p.EarlyDelay = f.earlyMs;
+    p.LateDelay = f.lateMs;
+    p.HFReference = f.hfRef;
+    p.HFDecayRatio = f.hfRatio;
+    p.Diffusion = f.diffusion * 100.f;
+    p.Density = f.density * 100.f;
     p.LowShelfFrequency = 250.f;
     p.LowShelfGain = 0.f;
     p.HighCut = 7500.f;
     p.EarlyLateMix = 55.f;
-    p.WetLevel = wetDb;
+    p.WetLevel = f.wetDb;
     int rc = a.setSystemReverb(a.system, 0, &p);
-    SPZ_LOGI("reverb send rc=%d decay=%.0f wet=%.1f (RT+PT hybrid)", rc, decayMs, wetDb);
+    SPZ_LOGI("spp reverb rc=%d decay=%.0f wet=%.1f encl=%.2f indoors=%d echo=%.0fms",
+             rc, f.decayMs, f.wetDb, f.enclosure, (int)f.indoors, f.echoDelayMs);
 }
 
 } // namespace
@@ -49,30 +52,14 @@ void onNewChannel(void* channel) {
 void update() {
     if (!cfg::reverbEnabled()) return;
     auto ps = mc::getPlayerState();
-    FMOD_VECTOR eye = ps.pos;
-    eye.y += 1.62f;
+    if (!ps.valid) return;
+    spp::Vec3 eye{ps.pos.x, ps.pos.y + 1.62, ps.pos.z};
+    spp::Vec3 center{ps.pos.x, ps.pos.y + 0.9, ps.pos.z};
 
-    trace::RaycastConfig ray{};
-    ray.rays = 12;
-    ray.maxBounces = 2;
-    ray.maxDistance = 28.f;
-    ray.speedOfSound = 343.f;
-    ray.reflectivity = 0.88f;
-
-    trace::PathTraceConfig path{};
-    path.paths = 12;
-    path.scatterDepth = 3;
-    path.maxSegment = 22.f;
-    path.speedOfSound = 343.f;
-    path.reflectivity = 0.85f;
-
-    auto h = trace::hybridRoom(eye, ray, path, cfg::maxRt60(), cfg::maxWetDb());
-
-    SPZ_LOGI("hybrid e=%.2f mean=%.1f sky=%d wet=%.1f decay=%.0f echo=%.0fms diff=%.2f",
-             h.room.enclosure, h.room.meanDist, h.room.sky, h.wetDb, h.decayMs,
-             h.echoDelayMs, h.diffusion);
-
-    sendProps(h.decayMs, h.earlyMs, h.wetDb, h.diffusion, h.density);
+    // One shared full-accuracy probe (200 rays, 3 bounces) per kTickRate.
+    const spp::SppStats& st = spp::engine().probe(eye, center);
+    spp::SppFmod f = spp::computeReverb(st);
+    sendProps(f);
 
     auto& a = fmodapi::api();
     std::lock_guard lock(gMu);

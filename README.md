@@ -1,36 +1,34 @@
-# SoundPhysicz Recreate **RT** (0.2.0-RT)
+# SoundPhysicz Recreate **SPP** (0.3.0-SPP)
 
-Alternate of the VCX recreate: **same FMOD actuation** (audible path), plus **Ray Tracing + Path Tracing**.
+Full-accuracy port of **Sound Physics Perfected** (Fabric 26.3,
+[`FalseMSP/SoundPhysicsPerfected`](https://github.com/FalseMSP/SoundPhysicsPerfected),
+MIT by RedDev) to Bedrock/LeviLauncher C++ with **FMOD actuation**.
 
-## Stack
+## How it maps
 
-```
-Hook FMOD (SoundPhysicz)
-    playSound → channel reverb send = 1
-    setReverbProperties(System) ← room params
-    set3DOcclusion ← walls
+| SPP Java (OpenAL) | This port (FMOD/Bedrock) |
+|---|---|
+| `RaycastingHelper` white rays (Fibonacci 200, 3 bounces, `world.clip`) | `src/spp/SppRays.cpp` — same rays via `mc::isSolid` march |
+| Blue rays (reverb probe) + `calculateEnhancedReverb` (Sabine RT60) | `SppRays::probeFull` + `SppReverb::computeReverb` |
+| Red rays (permeation `0.4^blocks`, explosion-resistance absorption) | same, `countBlocksBetween`; Bedrock block registry stubbed (OPENCODE) |
+| `OpenALEffectsHandler` EAX params | `SppReverb` → `FMOD_REVERB_PROPERTIES` (decay/diffusion/density/wet/early/late/HF) |
+| Green rays / non-permeation fallback | kept (compile-time `kPermeation` switch) |
+| `conf = rays/totalHit`, `atten = 1/d or 1/d²`, `tickRate = 10` | `SppChannel`, shared `SppEngine` probe (one 200-ray probe per 10 ticks) |
+| Thread pools | single-threaded (same math, no thread explosion on mobile) |
 
-Room model (this alternate)
-    Ray Tracing  (trace/Raycast.*)
-        specular DDA + face reflect + delay = path/343
-    Path Tracing (trace/PathTrace.*)
-        diffuse scatter at hits → late energy / diffusion
-    hybridRoom() → decayMs, wetDb, echo, diffusion
-```
+Kept from 0.2.0-RT: `src/trace/` hybrid as reference; FMOD hook skeleton unchanged.
 
-## New files vs 0.1.0
+## Credit
 
-| File | Role |
-|------|------|
-| `src/trace/Raycast.hpp/cpp` | Specular rays, enclosure probe |
-| `src/trace/PathTrace.hpp/cpp` | Diffuse paths, `hybridRoom()` |
-| `src/reverb/Reverb.cpp` | Uses hybrid instead of simple 10-ray only |
+Algorithm © RedDev / FalseMSP (MIT). See upstream repo for the original.
+This port keeps SPP defaults: 200 rays, 3 bounces, 64-block segments,
+`procRange` 200, permeation on.
 
 ## Still required (OPENCODE)
 
-Same as 0.1.0: `pl::memory::hook`, `getBlock`, `PLGetModRegistration`, wire `installHooks`.
-
-Without getBlock, rays never hit → enclosure low → outdoor wet. **FMOD hooks still needed for any sound.**
+Same as 0.2.x: `pl::memory::hook`, `getBlock`, `PLGetModRegistration`,
+wire `installHooks`. Until `mc::isSolid` is real every probe reads
+**outdoor** (wet −80) — expected. **FMOD hooks still needed for any sound.**
 
 ## Build
 
