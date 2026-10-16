@@ -2,8 +2,8 @@
   "type": "preload-native",
   "name": "SPP-Bedrock",
   "author": "SPP-port",
-  "description": "Sound Physics Perfected formulas on Bedrock. Not SPR.",
-  "version": "1.0.0",
+  "description": "Sound Physics Perfected formulas + BlockSource isSolidBlockingBlock (MC 1.26.52).",
+  "version": "1.1.0",
   "entry": "libSPPBedrock.so",
   "icon": "icon.png"
 }

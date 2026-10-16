@@ -2,6 +2,7 @@
 #include "Log.hpp"
 
 #include <pl/memory/Hook.hpp>
+#include <pl/memory/Signature.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -12,80 +13,104 @@ uintptr_t resolveVtableFunction(std::string_view name, std::size_t index, std::s
 
 namespace spp::mc {
 namespace {
-void* gRegion = nullptr;
-void* gAir = nullptr;
-bool gHaveAir = false;
 
-void* vt(void* o, size_t i) {
-    if (!o) return nullptr;
-    void** v = *reinterpret_cast<void***>(o);
-    return v ? v[i] : nullptr;
+void* gBlockSource = nullptr;
+
+// bool BlockSource::isSolidBlockingBlock(BlockPos const&)
+// Pattern unique on 1.26.52: ?? ?? ?? F9 ?? ?? ?? B9 ?? ?? ?? 29 ?? ?? ?? F9 E1 03 08 2A
+using IsSolidFn = bool (*)(void* self, const BlockPosRaw* pos);
+IsSolidFn gIsSolid = nullptr;
+
+using ClientUpdateFn = void (*)(void* self, bool);
+ClientUpdateFn gClientUpdateOrig = nullptr;
+void* gClientUpdateTarget = nullptr;
+
+constexpr std::size_t kClientUpdateSlot = 25;
+constexpr std::size_t kClientRegionSlot = 31;
+
+void* vtableFn(void* obj, std::size_t index) {
+    if (!obj) return nullptr;
+    void** vt = *reinterpret_cast<void***>(obj);
+    return vt ? vt[index] : nullptr;
 }
 
-using UpdateFn = void (*)(void*, bool);
-UpdateFn gUpO = nullptr;
-void* gUpT = nullptr;
-
-void hk(void* self, bool b) {
-    if (gUpO) gUpO(self, b);
-    using GR = void* (*)(void*);
-    auto* fn = reinterpret_cast<GR>(vt(self, 31));
-    if (fn) setRegion(fn(self));
+void onClientUpdate(void* self, bool arg) {
+    if (gClientUpdateOrig) gClientUpdateOrig(self, arg);
+    using GetRegionFn = void* (*)(void*);
+    auto* getRegion = reinterpret_cast<GetRegionFn>(vtableFn(self, kClientRegionSlot));
+    if (getRegion) {
+        if (void* region = getRegion(self)) setRegion(region);
+    }
 }
+
+bool resolveIsSolidBlocking() {
+    // Resound-style signature scan on libminecraftpe.so
+    const uintptr_t addr = pl::memory::resolveSignature(
+        "?? ?? ?? F9 ?? ?? ?? B9 ?? ?? ?? 29 ?? ?? ?? F9 E1 03 08 2A", "libminecraftpe.so");
+    if (!addr) {
+        SPP_LOGW("isSolidBlockingBlock: pattern not found (need 1.26.52 libminecraftpe)");
+        return false;
+    }
+    gIsSolid = reinterpret_cast<IsSolidFn>(addr);
+    SPP_LOGI("BlockSource::isSolidBlockingBlock @ %p", (void*)gIsSolid);
+    return true;
+}
+
+bool installClientDriver() {
+    const uintptr_t addr =
+        pl::memory::resolveVtableFunction("14ClientInstance", kClientUpdateSlot, "libminecraftpe.so");
+    if (!addr) {
+        SPP_LOGW("14ClientInstance slot %zu failed — BlockSource will stay null until fixed",
+                 kClientUpdateSlot);
+        return false;
+    }
+    gClientUpdateTarget = reinterpret_cast<void*>(addr);
+    const int rc = pl::memory::hook(gClientUpdateTarget, reinterpret_cast<void*>(&onClientUpdate),
+                                    reinterpret_cast<void**>(&gClientUpdateOrig),
+                                    pl::memory::HookPriority::Normal);
+    if (rc != 0) {
+        SPP_LOGE("ClientInstance update hook failed rc=%d", rc);
+        gClientUpdateTarget = nullptr;
+        return false;
+    }
+    SPP_LOGI("ClientInstance update hooked — feeding BlockSource* each tick");
+    return true;
+}
+
 } // namespace
 
 void setListener(float, float, float) {}
 
-void setRegion(void* r) {
-    gRegion = r;
-    gHaveAir = false;
-    gAir = nullptr;
+void setRegion(void* blockSource) { gBlockSource = blockSource; }
+
+bool isSolidBlocking(void* blockSource, int x, int y, int z) {
+    if (!blockSource || !gIsSolid) return false;
+    BlockPosRaw pos{x, y, z};
+    return gIsSolid(blockSource, &pos);
 }
 
 void sampleBlock(int bx, int by, int bz, bool& solid, float& absorption) {
     solid = false;
     absorption = 0.05f;
-    if (!gRegion) return;
-    struct BP {
-        int x, y, z;
-    } p{bx, by, bz};
-    using GB = void* (*)(void*, const BP&);
-    auto* fn = reinterpret_cast<GB>(vt(gRegion, 2));
-    if (!fn) return;
-    void* blk = fn(gRegion, p);
-    if (!blk) return;
-    if (!gHaveAir) {
-        BP airp{bx, 320, bz};
-        gAir = fn(gRegion, airp);
-        gHaveAir = true;
-    }
-    if (gAir && blk == gAir) {
-        solid = false;
-        absorption = 0.01f;
-        return;
-    }
-    solid = true;
-    absorption = 0.12f;
+    if (!gBlockSource || !gIsSolid) return;
+    solid = isSolidBlocking(gBlockSource, bx, by, bz);
+    absorption = solid ? 0.12f : 0.01f;
 }
 
-bool installClientDriver() {
-    uintptr_t a = pl::memory::resolveVtableFunction("14ClientInstance", 25, "libminecraftpe.so");
-    if (!a) {
-        SPP_LOGW("no ClientInstance driver");
-        return false;
-    }
-    gUpT = (void*)a;
-    if (pl::memory::hook(gUpT, (void*)&hk, (void**)&gUpO, pl::memory::HookPriority::Normal) != 0) {
-        SPP_LOGE("client hook failed");
-        return false;
-    }
-    SPP_LOGI("ClientInstance driver on");
-    return true;
+bool installWorldAccess() {
+    const bool solidOk = resolveIsSolidBlocking();
+    const bool clientOk = installClientDriver();
+    SPP_LOGI("world: isSolidBlocking=%d clientDriver=%d", (int)solidOk, (int)clientOk);
+    return solidOk || clientOk;
 }
 
-void uninstallClientDriver() {
-    if (gUpT) pl::memory::unhook(gUpT, (void*)&hk);
-    gUpT = nullptr;
+void uninstallWorldAccess() {
+    if (gClientUpdateTarget)
+        pl::memory::unhook(gClientUpdateTarget, reinterpret_cast<void*>(&onClientUpdate));
+    gClientUpdateTarget = nullptr;
+    gClientUpdateOrig = nullptr;
+    gIsSolid = nullptr;
+    gBlockSource = nullptr;
 }
 
 } // namespace spp::mc
